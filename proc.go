@@ -49,7 +49,7 @@ func startProc(target string, args []string, opts Options) (*Proc, error) {
 
 	options := unix.PTRACE_O_EXITKILL | unix.PTRACE_O_TRACECLONE |
 		unix.PTRACE_O_TRACEFORK | unix.PTRACE_O_TRACEVFORK |
-		unix.PTRACE_O_TRACESYSGOOD | unix.PTRACE_O_TRACEEXIT
+		unix.PTRACE_O_TRACESYSGOOD | unix.PTRACE_O_TRACEEXIT | unix.PTRACE_O_TRACEEXEC
 
 	p, err := newTracedProc(cmd.Process.Pid, opts)
 	if err != nil {

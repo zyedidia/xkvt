@@ -1,26 +1,46 @@
 package main
 
 import (
-	"flag"
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"runtime"
 	"strings"
 )
 
-type Step struct {
-	Name     string
-	Parents  []*Step
+type Excavation struct {
 	Commands []Command
 }
 
-type Command struct {
-	Name string
-	Args []string
+func (e *Excavation) ToJson() ([]byte, error) {
+	return json.Marshal(e)
+}
 
-	inputs  []string
-	outputs []string
+func (e *Excavation) ToKnit() []byte {
+	buf := &bytes.Buffer{}
+	buf.WriteString("return r{\n")
+	for _, c := range e.Commands {
+		buf.Write(c.ToKnit())
+		buf.WriteByte('\n')
+	}
+	buf.WriteString("}")
+	return buf.Bytes()
+}
+
+type Command struct {
+	Command string
+	Inputs  []string
+	Outputs []string
+}
+
+func (c *Command) ToKnit() []byte {
+	buf := &bytes.Buffer{}
+	buf.WriteString(fmt.Sprintf("$ %s: %s\n", strings.Join(c.Outputs, " "), strings.Join(c.Inputs, " ")))
+	buf.WriteString(fmt.Sprintf("    %s", c.Command))
+	return buf.Bytes()
 }
 
 func main() {
@@ -28,28 +48,53 @@ func main() {
 
 	log.SetOutput(io.Discard)
 
-	flag.Parse()
-	args := flag.Args()
+	cmds, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	target := args[0]
-	args = args[1:]
+	lines := strings.Split(string(cmds), "\n")
 
+	ex := &Excavation{}
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+		fmt.Fprintln(os.Stderr, line)
+		in, out := excavate("sh", "-c", line)
+		ex.Commands = append(ex.Commands, Command{
+			Command: line,
+			Inputs:  in,
+			Outputs: out,
+		})
+	}
+	fmt.Println(string(ex.ToKnit()))
+}
+
+// returns true if path is a subfile of dir
+func subFile(dir, path string) bool {
+	return path != "" && !strings.HasPrefix(path, "/")
+}
+
+func excavate(cmd string, args ...string) (in, out []string) {
 	inputs := make(map[string]bool)
 	outputs := make(map[string]bool)
 
-	prog, _, err := NewProgram(target, args, Options{
+	wd, err := os.Getwd()
+	if err != nil {
+		log.Fatal(err)
+	}
+	prog, _, err := NewProgram(cmd, args, Options{
 		OnRead: func(path string) {
-			if strings.HasSuffix(path, ".scala") {
-				if !outputs[path] {
-					inputs[path] = true
-				}
+			if !subFile(wd, path) {
+				return
 			}
-			// if len(path) == 0 || path[0] == '/' {
-			// 	return
-			// }
+			if !outputs[path] {
+				inputs[path] = true
+			}
 		},
 		OnWrite: func(path string) {
-			if len(path) == 0 || path[0] == '/' {
+			if !subFile(wd, path) {
 				return
 			}
 			if inputs[path] {
@@ -80,9 +125,10 @@ func main() {
 	}
 
 	for f := range inputs {
-		fmt.Println("input:", f)
+		in = append(in, f)
 	}
 	for f := range outputs {
-		fmt.Println("output:", f)
+		out = append(out, f)
 	}
+	return in, out
 }
