@@ -9,6 +9,8 @@ import (
 	"os"
 	"runtime"
 	"strings"
+
+	"github.com/spf13/pflag"
 )
 
 type Excavation struct {
@@ -46,9 +48,29 @@ func (c *Command) ToKnit() []byte {
 func main() {
 	runtime.LockOSThread()
 
-	log.SetOutput(io.Discard)
+	verbose := pflag.BoolP("verbose", "V", false, "verbose debugging information")
+	format := pflag.StringP("format", "f", "json", "output format")
+	output := pflag.StringP("output", "o", "", "output file")
+	input := pflag.StringP("input", "i", "", "input file")
+	pflag.Parse()
 
-	cmds, err := io.ReadAll(os.Stdin)
+	if !*verbose {
+		log.SetOutput(io.Discard)
+	}
+
+	var inf io.Reader
+	if *input != "" {
+		f, err := os.Open(*input)
+		if err != nil {
+			log.Fatal(err)
+		}
+		inf = f
+		defer f.Close()
+	} else {
+		inf = os.Stdin
+	}
+
+	cmds, err := io.ReadAll(inf)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -68,12 +90,38 @@ func main() {
 			Outputs: out,
 		})
 	}
-	fmt.Println(string(ex.ToKnit()))
+	var out []byte
+	switch *format {
+	case "json":
+		data, err := ex.ToJson()
+		if err != nil {
+			log.Fatal(err)
+		}
+		out = data
+	case "knit":
+		out = ex.ToKnit()
+	default:
+		log.Fatal(fmt.Sprintf("unknown format '%s'", *format))
+	}
+
+	var outf io.Writer
+	if *output != "" {
+		f, err := os.Create(*output)
+		if err != nil {
+			log.Fatal(err)
+		}
+		outf = f
+		defer f.Close()
+	} else {
+		outf = os.Stdout
+	}
+
+	outf.Write(out)
 }
 
 // returns true if path is a subfile of dir
 func subFile(dir, path string) bool {
-	return path != "" && !strings.HasPrefix(path, "/")
+	return strings.HasPrefix(path, dir)
 }
 
 func excavate(cmd string, args ...string) (in, out []string) {
@@ -90,6 +138,7 @@ func excavate(cmd string, args ...string) (in, out []string) {
 				return
 			}
 			if !outputs[path] {
+				log.Println("read from", path)
 				inputs[path] = true
 			}
 		},
@@ -97,7 +146,9 @@ func excavate(cmd string, args ...string) (in, out []string) {
 			if !subFile(wd, path) {
 				return
 			}
+			log.Println("write to", path)
 			if inputs[path] {
+				log.Println("delete", path)
 				delete(inputs, path)
 			}
 			outputs[path] = true

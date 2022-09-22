@@ -1,8 +1,11 @@
 package main
 
 import (
+	"fmt"
+	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 
 	"github.com/zyedidia/bld/ptrace"
 	"golang.org/x/sys/unix"
@@ -82,9 +85,9 @@ func newTracedProc(pid int, opts Options) (*Proc, error) {
 		tracer: ptrace.NewTracer(pid),
 		stack:  NewStack(),
 		fds: map[int]string{
-			0: "stdin",
-			1: "stdout",
-			2: "stderr",
+			0: "/dev/stdin",
+			1: "/dev/stdout",
+			2: "/dev/stderr",
 		},
 		opts: opts,
 	}
@@ -122,6 +125,7 @@ func (p *Proc) syscallEnter() (ExitFunc, error) {
 	case unix.SYS_CLOSE:
 		fd := int(regs.Rdi)
 		if _, ok := p.fds[fd]; ok {
+			log.Println("close", fd)
 			delete(p.fds, fd)
 			return nil, nil
 		}
@@ -144,19 +148,58 @@ func (p *Proc) syscallEnter() (ExitFunc, error) {
 			if fd < 0 {
 				return nil
 			}
+			log.Println("open", fd, path)
 			p.fds[fd] = path
 			return nil
 		}, nil
-
-	case unix.SYS_WRITE, unix.SYS_READ:
-		filename := p.fds[int(regs.Rdi)]
-		if regs.Orig_rax == unix.SYS_WRITE {
-			p.opts.OnWrite(filename)
+	case unix.SYS_RENAMEAT:
+		var path string
+		if int(regs.Rdx) == unix.AT_FDCWD {
+			var err error
+			path, err = p.Wd()
+			if err != nil {
+				return nil, err
+			}
 		} else {
-			p.opts.OnRead(filename)
+			path = p.fds[int(regs.Rdx)]
+		}
+		newpath, err := p.tracer.ReadCString(uintptr(regs.R10))
+		if err != nil {
+			return nil, err
+		}
+		log.Println("rename", path, newpath, regs.Rdx)
+		p.opts.OnWrite(abs(newpath, path))
+	case unix.SYS_RENAME:
+		wd, err := p.Wd()
+		if err != nil {
+			return nil, err
+		}
+		newpath, err := p.tracer.ReadCString(uintptr(regs.Rsi))
+		if err != nil {
+			return nil, err
+		}
+		p.opts.OnWrite(abs(newpath, wd))
+	case unix.SYS_WRITE, unix.SYS_READ:
+		wd, err := p.Wd()
+		if err != nil {
+			return nil, err
+		}
+		filename, ok := p.fds[int(regs.Rdi)]
+		if !ok {
+			return nil, nil
+		}
+		if regs.Orig_rax == unix.SYS_WRITE {
+			log.Println("WRITE", filename, regs.Rdi)
+			p.opts.OnWrite(abs(filename, wd))
+		} else {
+			p.opts.OnRead(abs(filename, wd))
 		}
 	}
 	return nil, nil
+}
+
+func (p *Proc) Wd() (string, error) {
+	return os.Readlink(fmt.Sprintf("/proc/%d/cwd", p.Pid()))
 }
 
 func (p *Proc) exit() {
@@ -176,4 +219,11 @@ func (p *Proc) cont(sig unix.Signal, groupStop bool) error {
 
 func (p *Proc) Pid() int {
 	return p.tracer.Pid()
+}
+
+func abs(path, wd string) string {
+	if filepath.IsAbs(path) {
+		return filepath.Clean(path)
+	}
+	return filepath.Join(wd, path)
 }
