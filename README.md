@@ -34,6 +34,47 @@ prog: bar.o foo.o
 
 Note that Xkvt automatically detects that `foo.o` depends on `bar.h` (as well as `foo.c`).
 
+Xkvt can also output a Knitfile, or a generic JSON representation that looks like this:
+
+<details>
+  <summary>Show JSON</summary>
+```
+{
+  "Commands": [
+    {
+      "Command": "gcc -Wall -O2 -c foo.c -o foo.o",
+      "Inputs": [
+        "foo.c",
+        "bar.h"
+      ],
+      "Outputs": [
+        "foo.o"
+      ]
+    },
+    {
+      "Command": "gcc -Wall -O2 -c bar.c -o bar.o",
+      "Inputs": [
+        "bar.c"
+      ],
+      "Outputs": [
+        "bar.o"
+      ]
+    },
+    {
+      "Command": "gcc -Wall -O2 bar.o foo.o -o prog",
+      "Inputs": [
+        "bar.o",
+        "foo.o"
+      ],
+      "Outputs": [
+        "prog"
+      ]
+    }
+  ]
+}
+```
+</details>
+
 # Usage
 
 ```
