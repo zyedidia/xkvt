@@ -49,10 +49,7 @@ func (p *Program) Wait(status *Status) (*Proc, error) {
 	status.groupStop = false
 	proc, ok := p.procs[wpid]
 	if !ok {
-		proc, err = newTracedProc(wpid, p.opts)
-		if err != nil {
-			return nil, err
-		}
+		proc = newTracedProc(wpid, p.opts)
 		p.procs[wpid] = proc
 		log.Printf("%d: new process created (tracing enabled)\n", wpid)
 		return proc, nil
@@ -81,11 +78,31 @@ func (p *Program) Wait(status *Status) (*Proc, error) {
 		}
 	} else if ws.TrapCause() == unix.PTRACE_EVENT_CLONE {
 		newpid, err := proc.tracer.GetEventMsg()
+		if err != nil {
+			return proc, err
+		}
 		log.Printf("%d: called clone() = %d (err=%v)\n", wpid, newpid, err)
+		child := newForkedProc(proc, false, int(newpid), p.opts)
+		p.procs[child.Pid()] = child
+		log.Printf("%d: new process cloned (tracing enabled)\n", child.Pid())
 	} else if ws.TrapCause() == unix.PTRACE_EVENT_FORK {
+		newpid, err := proc.tracer.GetEventMsg()
+		if err != nil {
+			return proc, err
+		}
 		log.Printf("%d: called fork()\n", wpid)
+		child := newForkedProc(proc, false, int(newpid), p.opts)
+		p.procs[child.Pid()] = child
+		log.Printf("%d: new process forked (tracing enabled)\n", child.Pid())
 	} else if ws.TrapCause() == unix.PTRACE_EVENT_VFORK {
+		newpid, err := proc.tracer.GetEventMsg()
+		if err != nil {
+			return proc, err
+		}
 		log.Printf("%d: called vfork()\n", wpid)
+		child := newForkedProc(proc, false, int(newpid), p.opts)
+		p.procs[child.Pid()] = child
+		log.Printf("%d: new process vforked (tracing enabled)\n", child.Pid())
 	} else if ws.TrapCause() == unix.PTRACE_EVENT_EXEC {
 		log.Printf("%d: called execve()\n", wpid)
 	} else if ws.TrapCause() == unix.PTRACE_EVENT_EXIT {

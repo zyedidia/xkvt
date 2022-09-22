@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -54,10 +53,7 @@ func startProc(target string, args []string, opts Options) (*Proc, error) {
 		unix.PTRACE_O_TRACEFORK | unix.PTRACE_O_TRACEVFORK |
 		unix.PTRACE_O_TRACESYSGOOD | unix.PTRACE_O_TRACEEXIT | unix.PTRACE_O_TRACEEXEC
 
-	p, err := newTracedProc(cmd.Process.Pid, opts)
-	if err != nil {
-		return nil, err
-	}
+	p := newTracedProc(cmd.Process.Pid, opts)
 	p.tracer.SetOptions(options)
 	// err = p.tracer.ReAttachAndContinue(options)
 	// if err != nil {
@@ -80,7 +76,7 @@ func startProc(target string, args []string, opts Options) (*Proc, error) {
 }
 
 // Begins tracing an already existing process
-func newTracedProc(pid int, opts Options) (*Proc, error) {
+func newTracedProc(pid int, opts Options) *Proc {
 	p := &Proc{
 		tracer: ptrace.NewTracer(pid),
 		stack:  NewStack(),
@@ -92,7 +88,26 @@ func newTracedProc(pid int, opts Options) (*Proc, error) {
 		opts: opts,
 	}
 
-	return p, nil
+	return p
+}
+
+func newForkedProc(from *Proc, cloneFiles bool, pid int, opts Options) *Proc {
+	p := &Proc{
+		tracer: ptrace.NewTracer(pid),
+		stack:  NewStack(),
+		opts:   opts,
+	}
+
+	if cloneFiles {
+		p.fds = from.fds
+	} else {
+		p.fds = make(map[int]string)
+		for k, v := range from.fds {
+			p.fds[k] = v
+		}
+	}
+
+	return p
 }
 
 func (p *Proc) handleInterrupt() error {
@@ -125,7 +140,6 @@ func (p *Proc) syscallEnter() (ExitFunc, error) {
 	case unix.SYS_CLOSE:
 		fd := int(regs.Rdi)
 		if _, ok := p.fds[fd]; ok {
-			log.Println("close", fd)
 			delete(p.fds, fd)
 			return nil, nil
 		}
@@ -148,7 +162,6 @@ func (p *Proc) syscallEnter() (ExitFunc, error) {
 			if fd < 0 {
 				return nil
 			}
-			log.Println("open", fd, path)
 			p.fds[fd] = path
 			return nil
 		}, nil
@@ -167,7 +180,6 @@ func (p *Proc) syscallEnter() (ExitFunc, error) {
 		if err != nil {
 			return nil, err
 		}
-		log.Println("rename", path, newpath, regs.Rdx)
 		p.opts.OnWrite(abs(newpath, path))
 	case unix.SYS_RENAME:
 		wd, err := p.Wd()
@@ -189,7 +201,6 @@ func (p *Proc) syscallEnter() (ExitFunc, error) {
 			return nil, nil
 		}
 		if regs.Orig_rax == unix.SYS_WRITE {
-			log.Println("WRITE", filename, regs.Rdi)
 			p.opts.OnWrite(abs(filename, wd))
 		} else {
 			p.opts.OnRead(abs(filename, wd))
