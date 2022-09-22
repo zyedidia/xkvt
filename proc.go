@@ -212,6 +212,9 @@ func (p *Proc) syscallEnter() (ExitFunc, error) {
 			return nil, err
 		}
 		p.opts.OnWrite(abs(newpath, wd))
+		// A previous version of xkvt used the read/write syscalls to determine
+		// how files are accessed, but this proved too brittle because it makes
+		// it difficult to account for things like pipes and mmap.
 		// case unix.SYS_WRITE, unix.SYS_READ:
 		// 	wd, err := p.Wd()
 		// 	if err != nil {

@@ -1,1 +1,5 @@
 xkvt
+example/*.o
+example/prog
+example/Makefile
+example/Knitfile
