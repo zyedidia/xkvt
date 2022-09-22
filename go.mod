@@ -1,4 +1,4 @@
-module github.com/zyedidia/bld
+module github.com/zyedidia/xkvt
 
 go 1.18
 

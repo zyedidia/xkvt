@@ -6,7 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"github.com/zyedidia/bld/ptrace"
+	"github.com/zyedidia/xkvt/ptrace"
 	"golang.org/x/sys/unix"
 )
 
@@ -145,16 +145,32 @@ func (p *Proc) syscallEnter() (ExitFunc, error) {
 		}
 	case unix.SYS_OPEN, unix.SYS_OPENAT:
 		var path string
+		var flags uint64
 		var err error
 		switch regs.Orig_rax {
 		case unix.SYS_OPEN:
 			path, err = p.tracer.ReadCString(uintptr(regs.Rdi))
+			flags = regs.Rsi
 		case unix.SYS_OPENAT:
 			path, err = p.tracer.ReadCString(uintptr(regs.Rsi))
+			flags = regs.Rdx
 		}
+
 		if err != nil {
 			return nil, err
 		}
+
+		var wd string
+		if regs.Orig_rax != unix.SYS_OPENAT || int32(regs.Rdi) == unix.AT_FDCWD {
+			wd, err = p.Wd()
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			wd = p.fds[int(regs.Rdi)]
+		}
+		path = abs(path, wd)
+
 		return func() error {
 			var exitRegs unix.PtraceRegs
 			p.tracer.GetRegs(&exitRegs)
@@ -162,12 +178,17 @@ func (p *Proc) syscallEnter() (ExitFunc, error) {
 			if fd < 0 {
 				return nil
 			}
+			if (flags&0b11) == unix.O_WRONLY || (flags&0b11) == unix.O_RDWR {
+				p.opts.OnWrite(path)
+			} else if (flags & 0b11) == unix.O_RDONLY {
+				p.opts.OnRead(path)
+			}
 			p.fds[fd] = path
 			return nil
 		}, nil
 	case unix.SYS_RENAMEAT:
 		var path string
-		if int(regs.Rdx) == unix.AT_FDCWD {
+		if int32(regs.Rdx) == unix.AT_FDCWD {
 			var err error
 			path, err = p.Wd()
 			if err != nil {
@@ -191,20 +212,21 @@ func (p *Proc) syscallEnter() (ExitFunc, error) {
 			return nil, err
 		}
 		p.opts.OnWrite(abs(newpath, wd))
-	case unix.SYS_WRITE, unix.SYS_READ:
-		wd, err := p.Wd()
-		if err != nil {
-			return nil, err
-		}
-		filename, ok := p.fds[int(regs.Rdi)]
-		if !ok {
-			return nil, nil
-		}
-		if regs.Orig_rax == unix.SYS_WRITE {
-			p.opts.OnWrite(abs(filename, wd))
-		} else {
-			p.opts.OnRead(abs(filename, wd))
-		}
+		// case unix.SYS_WRITE, unix.SYS_READ:
+		// 	wd, err := p.Wd()
+		// 	if err != nil {
+		// 		return nil, err
+		// 	}
+		// 	filename, ok := p.fds[int(regs.Rdi)]
+		// 	if !ok {
+		// 		log.Println(regs.Rdi, "not found")
+		// 		return nil, nil
+		// 	}
+		// 	if regs.Orig_rax == unix.SYS_WRITE {
+		// 		p.opts.OnWrite(abs(filename, wd))
+		// 	} else {
+		// 		p.opts.OnRead(abs(filename, wd))
+		// 	}
 	}
 	return nil, nil
 }
