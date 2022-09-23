@@ -24,7 +24,8 @@ type Excavation struct {
 }
 
 func (e *Excavation) ToJson() ([]byte, error) {
-	return json.Marshal(e)
+	data, err := json.Marshal(e)
+	return append(data, '\n'), err
 }
 
 func (e *Excavation) ToKnit() []byte {
@@ -34,7 +35,7 @@ func (e *Excavation) ToKnit() []byte {
 		buf.Write(c.ToKnit())
 		buf.WriteByte('\n')
 	}
-	buf.WriteString("}")
+	buf.WriteString("}\n")
 	return buf.Bytes()
 }
 
@@ -152,7 +153,6 @@ func main() {
 	}
 
 	outf.Write(out)
-	outf.Write([]byte{'\n'})
 }
 
 // returns true if path is a subfile of dir
