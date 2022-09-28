@@ -29,8 +29,9 @@ type Proc struct {
 }
 
 type Options struct {
-	OnRead  func(path string)
-	OnWrite func(path string)
+	OnRead   func(path string)
+	OnWrite  func(path string)
+	OnRemove func(path string)
 }
 
 func startProc(target string, args []string, opts Options) (*Proc, error) {
@@ -55,20 +56,6 @@ func startProc(target string, args []string, opts Options) (*Proc, error) {
 
 	p := newTracedProc(cmd.Process.Pid, opts)
 	p.tracer.SetOptions(options)
-	// err = p.tracer.ReAttachAndContinue(options)
-	// if err != nil {
-	// 	return nil, err
-	// }
-	//
-	// // Wait for the initial SIGTRAP created because we are attaching
-	// // with ReAttachAndContinue to properly handle group stops.
-	// var ws unix.WaitStatus
-	// _, err = unix.Wait4(p.tracer.Pid(), &ws, 0, nil)
-	// if err != nil {
-	// 	return nil, err
-	// 	// } else if ws.StopSignal() != unix.SIGTRAP {
-	// 	// 	return nil, errors.New("wait: received non SIGTRAP: " + ws.StopSignal().String())
-	// }
 	err = p.cont(0, false)
 
 	return p, err
@@ -212,6 +199,16 @@ func (p *Proc) syscallEnter() (ExitFunc, error) {
 			return nil, err
 		}
 		p.opts.OnWrite(abs(newpath, wd))
+	case unix.SYS_UNLINK:
+		wd, err := p.Wd()
+		if err != nil {
+			return nil, err
+		}
+		path, err := p.tracer.ReadCString(uintptr(regs.Rdi))
+		if err != nil {
+			return nil, err
+		}
+		p.opts.OnRemove(abs(path, wd))
 		// A previous version of xkvt used the read/write syscalls to determine
 		// how files are accessed, but this proved too brittle because it makes
 		// it difficult to account for things like pipes and mmap.

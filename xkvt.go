@@ -79,6 +79,7 @@ func main() {
 	format := pflag.StringP("format", "f", "json", "output format")
 	output := pflag.StringP("output", "o", "", "output file")
 	input := pflag.StringP("input", "i", "", "input file")
+	dir := pflag.StringP("dir", "d", ".", "only allow inputs/outputs from this directory and sub-directories")
 	help := pflag.BoolP("help", "h", false, "show this help message")
 
 	pflag.Parse()
@@ -111,13 +112,18 @@ func main() {
 
 	lines := strings.Split(string(cmds), "\n")
 
+	wd, err := filepath.Abs(*dir)
+	if err != nil {
+		fatal(err)
+	}
+
 	ex := &Excavation{}
 	for _, line := range lines {
 		if line == "" {
 			continue
 		}
 		fmt.Fprintln(os.Stderr, line)
-		in, out := excavate("sh", "-c", line)
+		in, out := excavate(wd, "sh", "-c", line)
 		ex.Commands = append(ex.Commands, Command{
 			Command: line,
 			Inputs:  in,
@@ -160,14 +166,15 @@ func subFile(dir, path string) bool {
 	return strings.HasPrefix(path, dir)
 }
 
-func excavate(cmd string, args ...string) (in, out []string) {
+func excavate(wd, cmd string, args ...string) (in, out []string) {
 	inputs := make(map[string]bool)
 	outputs := make(map[string]bool)
 
-	wd, err := os.Getwd()
+	mywd, err := os.Getwd()
 	if err != nil {
 		fatal(err)
 	}
+
 	prog, _, err := NewProgram(cmd, args, Options{
 		OnRead: func(path string) {
 			log.Println("rd", path)
@@ -187,6 +194,15 @@ func excavate(cmd string, args ...string) (in, out []string) {
 				delete(inputs, path)
 			}
 			outputs[path] = true
+		},
+		OnRemove: func(path string) {
+			log.Println("rm", path)
+			if !subFile(wd, path) {
+				return
+			}
+			if outputs[path] {
+				delete(outputs, path)
+			}
 		},
 	})
 	if err != nil {
@@ -211,14 +227,14 @@ func excavate(cmd string, args ...string) (in, out []string) {
 	}
 
 	for f := range inputs {
-		p, err := filepath.Rel(wd, f)
+		p, err := filepath.Rel(mywd, f)
 		if err != nil {
 			fatal(err)
 		}
 		in = append(in, p)
 	}
 	for f := range outputs {
-		p, err := filepath.Rel(wd, f)
+		p, err := filepath.Rel(mywd, f)
 		if err != nil {
 			fatal(err)
 		}
