@@ -174,23 +174,42 @@ func (p *Proc) syscallEnter() (ExitFunc, error) {
 			return nil
 		}, nil
 	case unix.SYS_RENAMEAT:
-		var path string
+		var newdir string
 		if int32(regs.Rdx) == unix.AT_FDCWD {
 			var err error
-			path, err = p.Wd()
+			newdir, err = p.Wd()
 			if err != nil {
 				return nil, err
 			}
 		} else {
-			path = p.fds[int(regs.Rdx)]
+			newdir = p.fds[int(regs.Rdx)]
+		}
+		var olddir string
+		if int32(regs.Rdi) == unix.AT_FDCWD {
+			var err error
+			olddir, err = p.Wd()
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			olddir = p.fds[int(regs.Rdi)]
+		}
+		oldpath, err := p.tracer.ReadCString(uintptr(regs.Rsi))
+		if err != nil {
+			return nil, err
 		}
 		newpath, err := p.tracer.ReadCString(uintptr(regs.R10))
 		if err != nil {
 			return nil, err
 		}
-		p.opts.OnWrite(abs(newpath, path))
+		p.opts.OnWrite(abs(newpath, newdir))
+		p.opts.OnRemove(abs(oldpath, olddir))
 	case unix.SYS_RENAME:
 		wd, err := p.Wd()
+		if err != nil {
+			return nil, err
+		}
+		oldpath, err := p.tracer.ReadCString(uintptr(regs.Rdi))
 		if err != nil {
 			return nil, err
 		}
@@ -199,6 +218,7 @@ func (p *Proc) syscallEnter() (ExitFunc, error) {
 			return nil, err
 		}
 		p.opts.OnWrite(abs(newpath, wd))
+		p.opts.OnRemove(abs(oldpath, wd))
 	case unix.SYS_UNLINK:
 		wd, err := p.Wd()
 		if err != nil {
